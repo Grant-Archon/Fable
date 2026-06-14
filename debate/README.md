@@ -59,12 +59,24 @@ mixing in weaker models. Lower-tier models are reserved for lower-level tasks.
 
 ## How it works
 
-1. **Panel (parallel).** Each model in the tier's panel answers concurrently with
-   the `web_search_20260209` and `code_execution_20260120` server tools (GA — no
-   beta header). Web search reaches the live web; code execution is a sandboxed
-   bash/python environment (no internet) for computation and checks.
+0. **Framing (with a clarification gate).** Before fan-out, the framing step first
+   checks whether the objective and context are clear. If the question is
+   materially ambiguous, it **stops and asks** — the harness prints 1–3 clarifying
+   questions and exits (code 2) instead of guessing; clarify and re-run, or pass
+   `--assume-clear` to force a best-effort interpretation. Otherwise it writes a
+   shared context brief (interpretation, key definitions, scope, fixed
+   assumptions, dimensions to address) given to every panelist, so they answer the
+   same question and stay comparable. The brief fixes the frame, not the answer.
+1. **Panel (parallel).** Each model in the tier's panel answers the *framed*
+   question concurrently with the `web_search_20260209` and
+   `code_execution_20260120` server tools (GA — no beta header). Web search
+   reaches the live web; code execution is a sandboxed bash/python environment
+   (no internet) for computation and checks.
 2. **Judge.** The judge model reads every panel answer and extracts the structure.
 3. **Synthesis.** The synthesizer writes the final answer grounded in that analysis.
+
+The framing pass runs on the tier's synthesizer model; the brief is also passed
+to the judge and synthesizer so they know the intended scope.
 
 ## Flags
 
@@ -75,7 +87,8 @@ mixing in weaker models. Lower-tier models are reserved for lower-level tasks.
 | `--judge-model` | tier judge | Overrides the tier's judge model. |
 | `--synth-model` | tier synth | Overrides the tier's synthesizer model. |
 | `--max-tokens` | `4096` | Per-call output cap. |
-| `--json FILE` | none | Write the full run (panel + analysis + answer) to FILE. |
+| `--assume-clear` | off | Skip the clarification gate; frame a best-effort interpretation even if ambiguous (for non-interactive pipelines). |
+| `--json FILE` | none | Write the full run (brief + panel + analysis + answer) to FILE. |
 
 ## Implementation notes
 
