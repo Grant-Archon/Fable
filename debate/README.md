@@ -1,10 +1,22 @@
 # Opus debate → Expanse synthesis
 
-A harness that runs **two debaters** (Opus 4.8 by default) on the same question,
-then has a **synthesizer** read both transcripts and produce the single best
-answer — the multi-agent-debate / mixture-of-agents pattern with an
-LLM-as-synthesizer. An optional cheap **referee** scores whether the synthesis
-actually resolved the disagreements, and can trigger one revision pass.
+Two debaters (Opus 4.8) argue the same question, then a synthesizer reads both
+transcripts and produces the single best answer — the multi-agent-debate /
+mixture-of-agents pattern with an LLM-as-synthesizer. An optional cheap referee
+scores whether the synthesis resolved the disagreements and can trigger a revision.
+
+## Two ways to run
+
+1. **Through Claude Code (primary, interactive).** Type `/debate <question>`. The
+   workflow lives in `.claude/`: two `debater` subagents and a `synthesizer`
+   subagent (each `claude-opus-4-8`) plus a `referee` (Haiku), orchestrated by the
+   `.claude/skills/debate/SKILL.md` skill. The synthesizer is its own subagent, so
+   its system prompt — carrying the output rules distilled from `CLAUDE-EXPANSE.md`
+   — fully governs the final answer. See `.claude/README-debate.md`.
+2. **Programmatically (this folder).** `python orchestrate.py "<question>"` calls
+   the API directly. Use this for scripts, CI, or batch runs. Documented below.
+
+Both paths share the same prompt design. The rest of this file documents path 2.
 
 ## Why not use `CLAUDE-EXPANSE.md` as the synthesizer prompt?
 
