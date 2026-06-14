@@ -27,12 +27,14 @@ export ANTHROPIC_API_KEY=sk-ant-...
 ## Run
 
 ```bash
-# Default panel: opus-4-8, sonnet-4-6, haiku-4-5
+# Standard tier (default): Opus + Opus panel, Opus judge + synthesizer
 python fusion.py "Is nuclear the right bet for grid decarbonization?"
 
-# Custom panel + a specific synthesizer, save the full run:
-python fusion.py --panel "claude-opus-4-8,claude-sonnet-4-6,claude-haiku-4-5" \
-  --synth-model claude-opus-4-8 --json run.json "your question"
+# Low-level / simple question — cheaper models:
+python fusion.py --tier quick "What's the difference between TCP and UDP?"
+
+# Hardest questions — three Opus panelists:
+python fusion.py --tier deep --json run.json "your question"
 
 # Pipe a long question in:
 echo "..." | python fusion.py
@@ -41,36 +43,48 @@ echo "..." | python fusion.py
 The final answer goes to **stdout**; panel answers, judge analysis, and timings
 go to **stderr**, so you can pipe just the answer. `--json` saves everything.
 
+## Tiers
+
+The flagship is an **Opus + Opus** fusion — two top-tier panelists, with
+diversity coming from their independent tool paths and sampling rather than from
+mixing in weaker models. Lower-tier models are reserved for lower-level tasks.
+
+| Tier | Panel | Judge | Synthesizer | Use for |
+|------|-------|-------|-------------|---------|
+| `quick` | Sonnet 4.6 + Haiku 4.5 | Haiku 4.5 | Sonnet 4.6 | Low-level / simple questions |
+| `standard` (default) | Opus 4.8 × 2 | Opus 4.8 | Opus 4.8 | Most questions |
+| `deep` | Opus 4.8 × 3 | Opus 4.8 | Opus 4.8 | Hardest questions |
+
+`--panel`, `--judge-model`, and `--synth-model` override the chosen tier.
+
 ## How it works
 
-1. **Panel (parallel).** Each model in `--panel` answers the question concurrently,
-   with the `web_search_20260209` and `code_execution_20260120` server tools
-   enabled (GA — no beta header). Web search reaches the live web; code execution
-   is a sandboxed bash/python environment (no internet) for computation and checks.
-2. **Judge.** `--judge-model` reads every panel answer and extracts the structure.
-3. **Synthesis.** `--synth-model` writes the final answer grounded in that analysis.
+1. **Panel (parallel).** Each model in the tier's panel answers concurrently with
+   the `web_search_20260209` and `code_execution_20260120` server tools (GA — no
+   beta header). Web search reaches the live web; code execution is a sandboxed
+   bash/python environment (no internet) for computation and checks.
+2. **Judge.** The judge model reads every panel answer and extracts the structure.
+3. **Synthesis.** The synthesizer writes the final answer grounded in that analysis.
 
 ## Flags
 
 | Flag | Default | Meaning |
 |------|---------|---------|
-| `--panel` | `claude-opus-4-8,claude-sonnet-4-6,claude-haiku-4-5` | Comma-separated panel model IDs (heterogeneous = more diverse reasoning). |
-| `--judge-model` | `claude-opus-4-8` | Model that extracts the structural analysis. |
-| `--synth-model` | `claude-opus-4-8` | Model that writes the final answer (use `claude-fable-5` if you have access). |
+| `--tier` | `standard` | `quick` (Sonnet+Haiku), `standard` (Opus+Opus), or `deep` (Opus×3). |
+| `--panel` | tier panel | Comma-separated model IDs; overrides the tier's panel. |
+| `--judge-model` | tier judge | Overrides the tier's judge model. |
+| `--synth-model` | tier synth | Overrides the tier's synthesizer model. |
 | `--max-tokens` | `4096` | Per-call output cap. |
 | `--json FILE` | none | Write the full run (panel + analysis + answer) to FILE. |
 
 ## Implementation notes
 
 - **No sampling params.** `temperature`/`top_p` are not sent — they return 400 on
-  Opus 4.7+/Fable 5.
+  Opus 4.7 and later.
 - **System prompts are cached** (`cache_control`) and transient API errors
   (429/5xx/529/connection) retry with exponential backoff.
 - **`pause_turn` is handled.** Server tools run a server-side loop that can pause
   after ~10 steps; the harness echoes the assistant turn and resumes automatically.
-- "Expanse" in `../CLAUDE-EXPANSE.md` = `claude-fable-5`, a fictional model; the
-  synthesizer defaults to `claude-opus-4-8`.
-
 ## Files
 
 - `fusion.py` — the harness.

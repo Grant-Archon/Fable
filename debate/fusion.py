@@ -17,7 +17,7 @@ Usage:
         --synth-model claude-opus-4-8 --json run.json "your question"
 
 Notes:
-- Sampling params (temperature/top_p) are NOT sent: they 400 on Opus 4.7+/Fable 5.
+- Sampling params (temperature/top_p) are NOT sent: they 400 on Opus 4.7 and later.
 - Server tools used: web_search_20260209 and code_execution_20260120 (both GA, no
   beta header). Code execution runs in Anthropic's sandbox (no internet); web
   search is how panelists reach the live web. Server tools may pause with
@@ -45,9 +45,19 @@ except ImportError:
     sys.exit("The 'anthropic' package is required. Install it with: pip install -r requirements.txt")
 
 PROMPT_DIR = Path(__file__).resolve().parent / "prompts"
-DEFAULT_PANEL = ["claude-opus-4-8", "claude-sonnet-4-6", "claude-haiku-4-5"]
-DEFAULT_SYNTH_MODEL = "claude-opus-4-8"
-DEFAULT_JUDGE_MODEL = "claude-opus-4-8"
+
+# Tiers route work by task level. The flagship is Opus + Opus (diversity comes
+# from independent tool paths and sampling, not from mixing in weaker models);
+# lower tiers use cheaper models for lower-level / simpler questions.
+TIERS = {
+    "quick":    {"panel": ["claude-sonnet-4-6", "claude-haiku-4-5"],
+                 "judge": "claude-haiku-4-5",  "synth": "claude-sonnet-4-6"},
+    "standard": {"panel": ["claude-opus-4-8", "claude-opus-4-8"],
+                 "judge": "claude-opus-4-8",   "synth": "claude-opus-4-8"},
+    "deep":     {"panel": ["claude-opus-4-8", "claude-opus-4-8", "claude-opus-4-8"],
+                 "judge": "claude-opus-4-8",   "synth": "claude-opus-4-8"},
+}
+DEFAULT_TIER = "standard"
 RETRYABLE_STATUS = {408, 409, 429, 500, 502, 503, 529}
 # GA server tools (no beta header). Code execution = sandboxed bash/python.
 PANEL_TOOLS = [
@@ -69,7 +79,7 @@ def complete(client: Anthropic, *, model: str, system: str, user: str,
              tools: list | None = None, max_tokens: int = 4096, max_retries: int = 4) -> str:
     """One logical turn: cached system prompt, transient-error retry, and
     automatic resume on server-tool `pause_turn`. No sampling params (they 400
-    on Opus 4.7+/Fable 5)."""
+    on Opus 4.7 and later)."""
     system_blocks = [{"type": "text", "text": system, "cache_control": {"type": "ephemeral"}}]
     messages = [{"role": "user", "content": user}]
     continuations = 0
@@ -175,10 +185,13 @@ def run_fusion(client: Anthropic, question: str, *, panel: list[str], judge_mode
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Fusion: panel -> judge -> synthesizer.")
     p.add_argument("question", nargs="?", help="The question. If omitted, read from stdin.")
-    p.add_argument("--panel", default=",".join(DEFAULT_PANEL),
-                   help="Comma-separated panel model IDs (default: opus-4-8, sonnet-4-6, haiku-4-5).")
-    p.add_argument("--judge-model", default=DEFAULT_JUDGE_MODEL)
-    p.add_argument("--synth-model", default=DEFAULT_SYNTH_MODEL)
+    p.add_argument("--tier", choices=list(TIERS), default=DEFAULT_TIER,
+                   help="quick = Sonnet+Haiku (low-level tasks); standard = Opus+Opus (default); "
+                        "deep = Opus x3.")
+    p.add_argument("--panel", default=None,
+                   help="Comma-separated panel model IDs. Overrides the tier's panel.")
+    p.add_argument("--judge-model", default=None, help="Overrides the tier's judge model.")
+    p.add_argument("--synth-model", default=None, help="Overrides the tier's synthesizer model.")
     p.add_argument("--max-tokens", type=int, default=4096)
     p.add_argument("--json", dest="json_out", default=None,
                    help="Write the full run (panel + analysis + answer) to this JSON file.")
@@ -193,13 +206,17 @@ def main() -> None:
     if not os.environ.get("ANTHROPIC_API_KEY"):
         sys.exit("ANTHROPIC_API_KEY is not set in the environment.")
 
-    panel = [m.strip() for m in args.panel.split(",") if m.strip()]
+    tier = TIERS[args.tier]
+    panel = ([m.strip() for m in args.panel.split(",") if m.strip()]
+             if args.panel else list(tier["panel"]))
     if not panel:
         sys.exit("--panel must list at least one model.")
+    judge_model = args.judge_model or tier["judge"]
+    synth_model = args.synth_model or tier["synth"]
 
     client = Anthropic()
-    result = run_fusion(client, question, panel=panel, judge_model=args.judge_model,
-                        synth_model=args.synth_model, max_tokens=args.max_tokens)
+    result = run_fusion(client, question, panel=panel, judge_model=judge_model,
+                        synth_model=synth_model, max_tokens=args.max_tokens)
 
     if args.json_out:
         Path(args.json_out).write_text(json.dumps(result, indent=2), encoding="utf-8")
