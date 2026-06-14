@@ -1,10 +1,9 @@
 # /fusion — panel → judge → synthesis (Claude Code)
 
 Answer a question by fanning it out to a panel of models in parallel (each with
-web search and bash), having a judge extract the structure across their answers,
-then a synthesizer write the final answer grounded in that analysis. This is the
-ensemble / mixture-of-agents pattern (inspired by OpenRouter Fusion); a
-programmatic API version lives in `../debate/fusion.py`.
+web search), having a judge extract the structure across their answers, then a
+synthesizer write the final answer grounded in that analysis. This is the
+ensemble / mixture-of-agents pattern, inspired by OpenRouter Fusion.
 
 ## Use
 
@@ -35,25 +34,39 @@ defaults to standard, dropping to quick only for clearly low-level questions
 The `fusion` skill runs in your main session as the orchestrator and drives
 these phases, on the models the tier selects:
 
-0. **Framing (with a clarification gate).** Before fanning out, the orchestrator
-   first checks that it understands the objective and context. If the question is
-   materially ambiguous, it **stops and asks you** (via AskUserQuestion) rather
-   than guessing, and spawns nothing until you answer. Once it's clear, it writes
+0. **Framing / triage.** Before fanning out, the orchestrator triages three ways:
+   if the question is **materially ambiguous** it **stops and asks you** (via
+   AskUserQuestion) rather than guessing, and spawns nothing until you answer; if
+   it's **trivial** (a lookup, definition, basic how-to) it just answers directly
+   and skips the pipeline, since ensembling adds nothing there; otherwise it writes
    a short shared context brief — interpretation, key definitions, scope, fixed
-   assumptions, and the dimensions to address — so the panel stays on one topic
-   and the answers are comparable. The brief fixes the frame, not the answer.
+   assumptions, dimensions to address — so the panel stays on one topic and the
+   answers are comparable. The brief fixes the frame, not the answer.
 1. **Panel (parallel).** It spawns the `panelist` subagent once per panel model
    at once, setting each one's model via the Agent tool's `model` override, and
-   gives every panelist the same question *plus the shared brief*. Each panelist
-   has web search + bash and answers independently — no cross-talk. At
-   standard/deep the panelists share the Opus model; they still diverge via
-   independent reasoning, but on the same framed question.
+   gives every panelist the same question and shared brief *plus a distinct
+   analytical lens* (first-principles vs. stress-test vs. evidence-weighing). Each
+   panelist has web search and answers independently — no cross-talk. At
+   standard/deep the panelists run on the same Opus model, so the lenses (not the
+   model) are what make them genuinely diverge. (Panelists are not granted Bash —
+   they reason and search rather than run shell commands.)
 2. **Judge.** The `judge` subagent reads every panel answer and extracts the
    structure: consensus, contradictions, partial coverage, unique insights,
    blind spots.
-3. **Synthesis.** The `synthesizer` subagent writes the final answer grounded in
-   the judge's analysis. Its system prompt carries the output rules distilled
-   from `CLAUDE-EXPANSE.md`, so it fully governs the answer you read.
+3. **Synthesis.** The `synthesizer` subagent writes the final answer from the
+   judge's (self-contained) analysis — the raw panel answers are not re-sent to
+   it, which keeps the largest input blob off the most expensive call. Its system
+   prompt carries the output rules distilled from `CLAUDE-EXPANSE.md`, so it fully
+   governs the answer you read.
+
+The whole pipeline runs silently: the only things you ever see are a clarifying
+question (on the rare materially-ambiguous query) and the final answer — no tier
+announcements, phase labels, or mention that a panel/judge/synthesizer ran.
+
+Token notes: the trivial shortcut and tiering are the main cost levers; the judge
+makes its analysis self-contained so the synthesizer needn't re-read the panel;
+panelists are told to search sparingly. (Framing-on-a-cheaper-model is a
+harness-only optimization — in Claude Code the orchestrator triages inline.)
 
 Orchestration stays in the main session (rather than a subagent spawning
 subagents) because nested subagent spawning needs Claude Code 2.1.172+.
