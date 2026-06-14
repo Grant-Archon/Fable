@@ -35,10 +35,13 @@ defaults to standard, dropping to quick only for clearly low-level questions
 The `fusion` skill runs in your main session as the orchestrator and drives
 these phases, on the models the tier selects:
 
-0. **Framing.** Before fanning out, the orchestrator writes a short shared context
-   brief for the question — interpretation, key definitions, scope, fixed
+0. **Framing (with a clarification gate).** Before fanning out, the orchestrator
+   first checks that it understands the objective and context. If the question is
+   materially ambiguous, it **stops and asks you** (via AskUserQuestion) rather
+   than guessing, and spawns nothing until you answer. Once it's clear, it writes
+   a short shared context brief — interpretation, key definitions, scope, fixed
    assumptions, and the dimensions to address — so the panel stays on one topic
-   and the answers are comparable. It fixes the frame, not the answer.
+   and the answers are comparable. The brief fixes the frame, not the answer.
 1. **Panel (parallel).** It spawns the `panelist` subagent once per panel model
    at once, setting each one's model via the Agent tool's `model` override, and
    gives every panelist the same question *plus the shared brief*. Each panelist

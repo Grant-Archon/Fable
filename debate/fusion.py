@@ -119,18 +119,33 @@ def banner(title: str, body: str) -> None:
 
 
 def run_fusion(client: Anthropic, question: str, *, panel: list[str], judge_model: str,
-               synth_model: str, max_tokens: int) -> dict:
+               synth_model: str, max_tokens: int, assume_clear: bool = False) -> dict:
     framing_system = load_prompt("framing_system.md")
     panelist_system = load_prompt("panelist_system.md")
     judge_system = load_prompt("judge_system.md")
     synth_system = load_prompt("synthesizer_system.md")
     timings: dict[str, float] = {}
 
-    # --- Phase 0: framing — a shared context brief keeps the panel on one topic ---
+    # --- Phase 0: framing — clarify first, then a shared context brief ---
+    framing_user = f"Question:\n{question}"
+    if assume_clear:
+        framing_user += ("\n\nDo not ask for clarification; resolve any ambiguity to the most "
+                         "useful interpretation and output the BRIEF.")
     t0 = time.time()
-    brief = complete(client, model=synth_model, system=framing_system,
-                     user=f"Question:\n{question}", max_tokens=max_tokens)
+    framed = complete(client, model=synth_model, system=framing_system,
+                      user=framing_user, max_tokens=max_tokens)
     timings["framing"] = time.time() - t0
+
+    # If the question is materially ambiguous, stop and ask the user — don't guess.
+    if framed.upper().lstrip().startswith("NEEDS_CLARIFICATION"):
+        questions = framed.split("\n", 1)[1].strip() if "\n" in framed else "(no questions returned)"
+        print("\nThe question is ambiguous — clarification needed before running Fusion.\n\n"
+              f"{questions}\n\nAnswer these and re-run with a clarified question "
+              "(or pass --assume-clear to proceed with a best-effort interpretation).",
+              file=sys.stderr)
+        sys.exit(2)
+
+    brief = framed.split("\n", 1)[1].strip() if framed.upper().lstrip().startswith("BRIEF") else framed
     banner(f"SHARED CONTEXT BRIEF  [{synth_model}]", brief)
 
     framed_question = (f"Question:\n{question}\n\nShared context brief (all panelists share this "
@@ -209,6 +224,9 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--judge-model", default=None, help="Overrides the tier's judge model.")
     p.add_argument("--synth-model", default=None, help="Overrides the tier's synthesizer model.")
     p.add_argument("--max-tokens", type=int, default=4096)
+    p.add_argument("--assume-clear", action="store_true",
+                   help="Skip the clarification gate; frame a best-effort interpretation even if "
+                        "the question is ambiguous (for non-interactive pipelines).")
     p.add_argument("--json", dest="json_out", default=None,
                    help="Write the full run (panel + analysis + answer) to this JSON file.")
     return p.parse_args()
@@ -232,7 +250,8 @@ def main() -> None:
 
     client = Anthropic()
     result = run_fusion(client, question, panel=panel, judge_model=judge_model,
-                        synth_model=synth_model, max_tokens=args.max_tokens)
+                        synth_model=synth_model, max_tokens=args.max_tokens,
+                        assume_clear=args.assume_clear)
 
     if args.json_out:
         Path(args.json_out).write_text(json.dumps(result, indent=2), encoding="utf-8")
