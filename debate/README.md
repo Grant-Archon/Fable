@@ -46,8 +46,9 @@ go to **stderr**, so you can pipe just the answer. `--json` saves everything.
 ## Tiers
 
 The flagship is an **Opus + Opus** fusion — two top-tier panelists, with
-diversity coming from their independent tool paths and sampling rather than from
-mixing in weaker models. Lower-tier models are reserved for lower-level tasks.
+diversity coming from a distinct analytical lens per panelist (plus independent
+tool paths) rather than from mixing in weaker models. Lower-tier models are
+reserved for lower-level tasks.
 
 | Tier | Panel | Judge | Synthesizer | Use for |
 |------|-------|-------|-------------|---------|
@@ -83,10 +84,18 @@ mixing in weaker models. Lower-tier models are reserved for lower-level tasks.
    already carries what it needs — which keeps the largest input blob off the most
    expensive call.
 
+Each panelist gets a distinct analytical lens (first-principles / stress-test /
+evidence-weighing / contrarian, round-robin) so same-model panelists genuinely
+diverge — sampling params can't be sent on Opus 4.7+, so the lens is what creates
+diversity, not temperature. At the deep tier the raw panel answers are also passed
+to the synthesizer so it can check the judge; at quick/standard the judge analysis
+alone is used. Panelists run with a per-call timeout and a capped worker pool, and
+a panelist that fails or times out is dropped (the run continues with survivors).
+
 Token notes: framing runs on a cheap model per tier; panelists are capped at
-`PANEL_MAX_TOKENS` (2048) and `web_search` at `WEB_SEARCH_MAX_USES` (5) uses;
-trivial questions skip the pipeline entirely. The brief is passed to the judge so
-it knows the intended scope.
+`--panel-max-tokens` (default 3000), the final answer at `--synth-max-tokens`
+(default 8192), and `web_search` at `WEB_SEARCH_MAX_USES` (5) uses; truncation is
+warned to stderr; trivial questions skip the pipeline entirely.
 
 ## Flags
 
@@ -97,9 +106,11 @@ it knows the intended scope.
 | `--panel` | tier panel | Comma-separated model IDs; overrides the tier's panel. |
 | `--judge-model` | tier judge | Overrides the tier's judge model. |
 | `--synth-model` | tier synth | Overrides the tier's synthesizer model. |
-| `--max-tokens` | `4096` | Per-call output cap (judge/synth/framing; panelists use 2048). |
-| `--assume-clear` | off | Skip the clarification gate; frame a best-effort interpretation even if ambiguous (for non-interactive pipelines). |
-| `--force-panel` | off | Always run the full panel; don't shortcut trivial questions. |
+| `--max-tokens` | `4096` | Output cap for framing and judge calls. |
+| `--panel-max-tokens` | `3000` | Output cap per panelist. |
+| `--synth-max-tokens` | `8192` | Output cap for the final synthesized answer. |
+| `--assume-clear` | off | Skip the clarification gate; proceed even if ambiguous (enforced in code). |
+| `--force-panel` | off | Always run the full panel; don't shortcut trivial questions (enforced in code). |
 | `--json FILE` | none | Write the full run (brief + panel + analysis + answer) to FILE. |
 
 ## Implementation notes

@@ -45,10 +45,13 @@ these phases, on the models the tier selects:
    answers are comparable. The brief fixes the frame, not the answer.
 1. **Panel (parallel).** It spawns the `panelist` subagent once per panel model
    at once, setting each one's model via the Agent tool's `model` override, and
-   gives every panelist the same question *plus the shared brief*. Each panelist
-   has web search + bash and answers independently — no cross-talk. At
-   standard/deep the panelists share the Opus model; they still diverge via
-   independent reasoning, but on the same framed question.
+   gives every panelist the same question and shared brief *plus a distinct
+   analytical lens* (first-principles vs. stress-test vs. evidence-weighing). Each
+   panelist has web search and answers independently — no cross-talk. At
+   standard/deep the panelists run on the same Opus model, so the lenses (not the
+   model) are what make them genuinely diverge. (Panelists are not granted Bash —
+   they reason and search; the API path's sandboxed code execution is not mirrored
+   to the user's real shell here.)
 2. **Judge.** The `judge` subagent reads every panel answer and extracts the
    structure: consensus, contradictions, partial coverage, unique insights,
    blind spots.
