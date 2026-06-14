@@ -59,6 +59,10 @@ these phases, on the models the tier selects:
    prompt carries the output rules distilled from `CLAUDE-EXPANSE.md`, so it fully
    governs the answer you read.
 
+The whole pipeline runs silently: the only things you ever see are a clarifying
+question (on the rare materially-ambiguous query) and the final answer — no tier
+announcements, phase labels, or mention that a panel/judge/synthesizer ran.
+
 Token notes: the trivial shortcut and tiering are the main cost levers; the judge
 makes its analysis self-contained so the synthesizer needn't re-read the panel;
 panelists are told to search sparingly. (Framing-on-a-cheaper-model is a
