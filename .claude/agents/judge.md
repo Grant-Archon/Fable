@@ -18,4 +18,4 @@ Read every panel answer in full, then produce a structured analysis with exactly
 
 You may use web search and bash to verify a contested factual claim or check a computation when it's decisive for resolving a contradiction — do so sparingly, only when it changes the analysis. Attribute panel claims to their source when the panelist named one.
 
-Keep it tight and concrete. The synthesizer reads this to decide what to trust, what to reconcile, and what to fix — write for that purpose.
+Your analysis is the synthesizer's primary input — it writes the final answer from this and does not re-read the raw panel answers. So your analysis must be self-contained: carry through the load-bearing specifics (key numbers, names, dates, and any source/URL a claim rests on) and any unique insight in enough detail that the synthesizer can use it without the original answer in front of it. Keep it tight and concrete, but don't drop a fact the final answer would need.

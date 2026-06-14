@@ -35,13 +35,14 @@ defaults to standard, dropping to quick only for clearly low-level questions
 The `fusion` skill runs in your main session as the orchestrator and drives
 these phases, on the models the tier selects:
 
-0. **Framing (with a clarification gate).** Before fanning out, the orchestrator
-   first checks that it understands the objective and context. If the question is
-   materially ambiguous, it **stops and asks you** (via AskUserQuestion) rather
-   than guessing, and spawns nothing until you answer. Once it's clear, it writes
+0. **Framing / triage.** Before fanning out, the orchestrator triages three ways:
+   if the question is **materially ambiguous** it **stops and asks you** (via
+   AskUserQuestion) rather than guessing, and spawns nothing until you answer; if
+   it's **trivial** (a lookup, definition, basic how-to) it just answers directly
+   and skips the pipeline, since ensembling adds nothing there; otherwise it writes
    a short shared context brief — interpretation, key definitions, scope, fixed
-   assumptions, and the dimensions to address — so the panel stays on one topic
-   and the answers are comparable. The brief fixes the frame, not the answer.
+   assumptions, dimensions to address — so the panel stays on one topic and the
+   answers are comparable. The brief fixes the frame, not the answer.
 1. **Panel (parallel).** It spawns the `panelist` subagent once per panel model
    at once, setting each one's model via the Agent tool's `model` override, and
    gives every panelist the same question *plus the shared brief*. Each panelist
@@ -51,9 +52,16 @@ these phases, on the models the tier selects:
 2. **Judge.** The `judge` subagent reads every panel answer and extracts the
    structure: consensus, contradictions, partial coverage, unique insights,
    blind spots.
-3. **Synthesis.** The `synthesizer` subagent writes the final answer grounded in
-   the judge's analysis. Its system prompt carries the output rules distilled
-   from `CLAUDE-EXPANSE.md`, so it fully governs the answer you read.
+3. **Synthesis.** The `synthesizer` subagent writes the final answer from the
+   judge's (self-contained) analysis — the raw panel answers are not re-sent to
+   it, which keeps the largest input blob off the most expensive call. Its system
+   prompt carries the output rules distilled from `CLAUDE-EXPANSE.md`, so it fully
+   governs the answer you read.
+
+Token notes: the trivial shortcut and tiering are the main cost levers; the judge
+makes its analysis self-contained so the synthesizer needn't re-read the panel;
+panelists are told to search sparingly. (Framing-on-a-cheaper-model is a
+harness-only optimization — in Claude Code the orchestrator triages inline.)
 
 Orchestration stays in the main session (rather than a subagent spawning
 subagents) because nested subagent spawning needs Claude Code 2.1.172+.

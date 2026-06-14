@@ -48,20 +48,29 @@ PROMPT_DIR = Path(__file__).resolve().parent / "prompts"
 
 # Tiers route work by task level. The flagship is Opus + Opus (diversity comes
 # from independent tool paths and sampling, not from mixing in weaker models);
-# lower tiers use cheaper models for lower-level / simpler questions.
+# lower tiers use cheaper models for lower-level / simpler questions. Framing is
+# scoping work (triage + a short brief), so it runs on a cheaper model than the
+# panel/synthesis even at the top tiers.
 TIERS = {
-    "quick":    {"panel": ["claude-sonnet-4-6", "claude-haiku-4-5"],
+    "quick":    {"frame": "claude-haiku-4-5",
+                 "panel": ["claude-sonnet-4-6", "claude-haiku-4-5"],
                  "judge": "claude-haiku-4-5",  "synth": "claude-sonnet-4-6"},
-    "standard": {"panel": ["claude-opus-4-8", "claude-opus-4-8"],
+    "standard": {"frame": "claude-haiku-4-5",
+                 "panel": ["claude-opus-4-8", "claude-opus-4-8"],
                  "judge": "claude-opus-4-8",   "synth": "claude-opus-4-8"},
-    "deep":     {"panel": ["claude-opus-4-8", "claude-opus-4-8", "claude-opus-4-8"],
+    "deep":     {"frame": "claude-sonnet-4-6",
+                 "panel": ["claude-opus-4-8", "claude-opus-4-8", "claude-opus-4-8"],
                  "judge": "claude-opus-4-8",   "synth": "claude-opus-4-8"},
 }
+# Panelist answers are raw material for the judge, not final prose — cap them
+# tighter than the judge/synthesis calls.
+PANEL_MAX_TOKENS = 2048
+WEB_SEARCH_MAX_USES = 5  # cap searches per panelist (input-token control)
 DEFAULT_TIER = "standard"
 RETRYABLE_STATUS = {408, 409, 429, 500, 502, 503, 529}
 # GA server tools (no beta header). Code execution = sandboxed bash/python.
 PANEL_TOOLS = [
-    {"type": "web_search_20260209", "name": "web_search"},
+    {"type": "web_search_20260209", "name": "web_search", "max_uses": WEB_SEARCH_MAX_USES},
     {"type": "code_execution_20260120", "name": "code_execution"},
 ]
 MAX_CONTINUATIONS = 6  # safety cap on pause_turn resumes per call
@@ -118,35 +127,44 @@ def banner(title: str, body: str) -> None:
     print(f"\n{'='*70}\n{title}\n{'='*70}\n{body}", file=sys.stderr)
 
 
-def run_fusion(client: Anthropic, question: str, *, panel: list[str], judge_model: str,
-               synth_model: str, max_tokens: int, assume_clear: bool = False) -> dict:
+def run_fusion(client: Anthropic, question: str, *, frame_model: str, panel: list[str],
+               judge_model: str, synth_model: str, max_tokens: int,
+               assume_clear: bool = False, force_panel: bool = False) -> dict:
     framing_system = load_prompt("framing_system.md")
     panelist_system = load_prompt("panelist_system.md")
     judge_system = load_prompt("judge_system.md")
     synth_system = load_prompt("synthesizer_system.md")
     timings: dict[str, float] = {}
 
-    # --- Phase 0: framing — clarify first, then a shared context brief ---
+    # --- Phase 0: framing — triage (clarify / answer-trivially / frame) ---
     framing_user = f"Question:\n{question}"
     if assume_clear:
-        framing_user += ("\n\nDo not ask for clarification; resolve any ambiguity to the most "
-                         "useful interpretation and output the BRIEF.")
+        framing_user += "\n\nDo not ask for clarification; choose TRIVIAL or BRIEF."
+    if force_panel:
+        framing_user += "\n\nDo not answer the question yourself; choose NEEDS_CLARIFICATION or BRIEF."
     t0 = time.time()
-    framed = complete(client, model=synth_model, system=framing_system,
+    framed = complete(client, model=frame_model, system=framing_system,
                       user=framing_user, max_tokens=max_tokens)
     timings["framing"] = time.time() - t0
+    tag = framed.upper().lstrip()
+    body = framed.split("\n", 1)[1].strip() if "\n" in framed else ""
 
-    # If the question is materially ambiguous, stop and ask the user — don't guess.
-    if framed.upper().lstrip().startswith("NEEDS_CLARIFICATION"):
-        questions = framed.split("\n", 1)[1].strip() if "\n" in framed else "(no questions returned)"
+    # Materially ambiguous → stop and ask the user (don't guess).
+    if tag.startswith("NEEDS_CLARIFICATION"):
         print("\nThe question is ambiguous — clarification needed before running Fusion.\n\n"
-              f"{questions}\n\nAnswer these and re-run with a clarified question "
-              "(or pass --assume-clear to proceed with a best-effort interpretation).",
+              f"{body or '(no questions returned)'}\n\nAnswer these and re-run with a clarified "
+              "question (or pass --assume-clear to proceed with a best-effort interpretation).",
               file=sys.stderr)
         sys.exit(2)
 
-    brief = framed.split("\n", 1)[1].strip() if framed.upper().lstrip().startswith("BRIEF") else framed
-    banner(f"SHARED CONTEXT BRIEF  [{synth_model}]", brief)
+    # Trivial → a single answer is as good as a panel; skip the pipeline entirely.
+    if tag.startswith("TRIVIAL"):
+        banner(f"TRIVIAL — answered directly  [{frame_model}]", body)
+        return {"question": question, "config": {"tier_resolved": "trivial",
+                "frame_model": frame_model}, "trivial": True, "final_answer": body}
+
+    brief = body if tag.startswith("BRIEF") else framed
+    banner(f"SHARED CONTEXT BRIEF  [{frame_model}]", brief)
 
     framed_question = (f"Question:\n{question}\n\nShared context brief (all panelists share this "
                        f"frame — stay within it; reason independently on the substance):\n"
@@ -155,7 +173,7 @@ def run_fusion(client: Anthropic, question: str, *, panel: list[str], judge_mode
     # --- Phase 1: panel fan-out (parallel, tool-enabled, all on the same frame) ---
     def ask_panelist(model: str) -> str:
         return complete(client, model=model, system=panelist_system, user=framed_question,
-                        tools=PANEL_TOOLS, max_tokens=max_tokens)
+                        tools=PANEL_TOOLS, max_tokens=PANEL_MAX_TOKENS)
 
     t0 = time.time()
     with ThreadPoolExecutor(max_workers=max(1, len(panel))) as pool:
@@ -186,12 +204,13 @@ def run_fusion(client: Anthropic, question: str, *, panel: list[str], judge_mode
     timings["judge"] = time.time() - t0
     banner(f"JUDGE ANALYSIS  [{judge_model}]", analysis)
 
-    # --- Phase 3: synthesizer writes the final answer, grounded in the analysis ---
+    # --- Phase 3: synthesizer writes the final answer from the judge's analysis ---
+    # (Raw panel answers are NOT re-sent here — the analysis is self-contained.
+    # That removes the largest redundant input blob from the most expensive call.)
     synth_user = (f"Question:\n{question}\n\nShared context brief the panel worked from:\n"
                   f"<context_brief>\n{brief}\n</context_brief>\n\n"
-                  f"The judge's structural analysis of the panel:\n\n"
+                  f"The judge's structural analysis of the panel (your source material):\n\n"
                   f"<judge_analysis>\n{analysis}\n</judge_analysis>\n\n"
-                  f"The panel's answers:\n\n{panel_block}\n\n"
                   f"Write the single best final answer for the user, grounded in the analysis.")
     t0 = time.time()
     final = complete(client, model=synth_model, system=synth_system, user=synth_user,
@@ -204,7 +223,8 @@ def run_fusion(client: Anthropic, question: str, *, panel: list[str], judge_mode
 
     return {
         "question": question,
-        "config": {"panel": panel, "judge_model": judge_model, "synth_model": synth_model},
+        "config": {"frame_model": frame_model, "panel": panel,
+                   "judge_model": judge_model, "synth_model": synth_model},
         "context_brief": brief,
         "panel": [{"label": l, "model": m, "answer": t} for l, m, t in answers],
         "judge_analysis": analysis,
@@ -219,6 +239,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--tier", choices=list(TIERS), default=DEFAULT_TIER,
                    help="quick = Sonnet+Haiku (low-level tasks); standard = Opus+Opus (default); "
                         "deep = Opus x3.")
+    p.add_argument("--frame-model", default=None, help="Overrides the tier's framing model.")
     p.add_argument("--panel", default=None,
                    help="Comma-separated panel model IDs. Overrides the tier's panel.")
     p.add_argument("--judge-model", default=None, help="Overrides the tier's judge model.")
@@ -227,6 +248,8 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--assume-clear", action="store_true",
                    help="Skip the clarification gate; frame a best-effort interpretation even if "
                         "the question is ambiguous (for non-interactive pipelines).")
+    p.add_argument("--force-panel", action="store_true",
+                   help="Always run the full panel; don't shortcut trivial questions to a direct answer.")
     p.add_argument("--json", dest="json_out", default=None,
                    help="Write the full run (panel + analysis + answer) to this JSON file.")
     return p.parse_args()
@@ -245,13 +268,15 @@ def main() -> None:
              if args.panel else list(tier["panel"]))
     if not panel:
         sys.exit("--panel must list at least one model.")
+    frame_model = args.frame_model or tier["frame"]
     judge_model = args.judge_model or tier["judge"]
     synth_model = args.synth_model or tier["synth"]
 
     client = Anthropic()
-    result = run_fusion(client, question, panel=panel, judge_model=judge_model,
-                        synth_model=synth_model, max_tokens=args.max_tokens,
-                        assume_clear=args.assume_clear)
+    result = run_fusion(client, question, frame_model=frame_model, panel=panel,
+                        judge_model=judge_model, synth_model=synth_model,
+                        max_tokens=args.max_tokens, assume_clear=args.assume_clear,
+                        force_panel=args.force_panel)
 
     if args.json_out:
         Path(args.json_out).write_text(json.dumps(result, indent=2), encoding="utf-8")

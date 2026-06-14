@@ -59,35 +59,47 @@ mixing in weaker models. Lower-tier models are reserved for lower-level tasks.
 
 ## How it works
 
-0. **Framing (with a clarification gate).** Before fan-out, the framing step first
-   checks whether the objective and context are clear. If the question is
-   materially ambiguous, it **stops and asks** — the harness prints 1–3 clarifying
-   questions and exits (code 2) instead of guessing; clarify and re-run, or pass
-   `--assume-clear` to force a best-effort interpretation. Otherwise it writes a
-   shared context brief (interpretation, key definitions, scope, fixed
-   assumptions, dimensions to address) given to every panelist, so they answer the
-   same question and stay comparable. The brief fixes the frame, not the answer.
+0. **Framing / triage.** Before fan-out, the framing step (on a cheaper model —
+   Haiku at quick/standard, Sonnet at deep) triages the question three ways:
+   - **Materially ambiguous** → it **stops and asks**: the harness prints 1–3
+     clarifying questions and exits (code 2) instead of guessing. Clarify and
+     re-run, or pass `--assume-clear` to force a best-effort interpretation.
+   - **Trivial** (a lookup, definition, basic how-to, short calculation) → it
+     answers directly and skips the whole pipeline — no panel/judge/synthesis,
+     since ensembling adds nothing on easy questions. `--force-panel` disables this.
+   - **Panel-worthy** → it writes a shared context brief (interpretation, key
+     definitions, scope, fixed assumptions, dimensions to address) given to every
+     panelist, so they answer the same question and stay comparable. The brief
+     fixes the frame, not the answer.
 1. **Panel (parallel).** Each model in the tier's panel answers the *framed*
    question concurrently with the `web_search_20260209` and
    `code_execution_20260120` server tools (GA — no beta header). Web search
    reaches the live web; code execution is a sandboxed bash/python environment
    (no internet) for computation and checks.
-2. **Judge.** The judge model reads every panel answer and extracts the structure.
-3. **Synthesis.** The synthesizer writes the final answer grounded in that analysis.
+2. **Judge.** The judge model reads every panel answer and extracts the structure
+   into a self-contained analysis (it carries the panel's key specifics and sources).
+3. **Synthesis.** The synthesizer writes the final answer from the judge's analysis.
+   The raw panel answers are **not** re-sent to the synthesizer — the analysis
+   already carries what it needs — which keeps the largest input blob off the most
+   expensive call.
 
-The framing pass runs on the tier's synthesizer model; the brief is also passed
-to the judge and synthesizer so they know the intended scope.
+Token notes: framing runs on a cheap model per tier; panelists are capped at
+`PANEL_MAX_TOKENS` (2048) and `web_search` at `WEB_SEARCH_MAX_USES` (5) uses;
+trivial questions skip the pipeline entirely. The brief is passed to the judge so
+it knows the intended scope.
 
 ## Flags
 
 | Flag | Default | Meaning |
 |------|---------|---------|
 | `--tier` | `standard` | `quick` (Sonnet+Haiku), `standard` (Opus+Opus), or `deep` (Opus×3). |
+| `--frame-model` | tier frame | Overrides the tier's framing/triage model. |
 | `--panel` | tier panel | Comma-separated model IDs; overrides the tier's panel. |
 | `--judge-model` | tier judge | Overrides the tier's judge model. |
 | `--synth-model` | tier synth | Overrides the tier's synthesizer model. |
-| `--max-tokens` | `4096` | Per-call output cap. |
+| `--max-tokens` | `4096` | Per-call output cap (judge/synth/framing; panelists use 2048). |
 | `--assume-clear` | off | Skip the clarification gate; frame a best-effort interpretation even if ambiguous (for non-interactive pipelines). |
+| `--force-panel` | off | Always run the full panel; don't shortcut trivial questions. |
 | `--json FILE` | none | Write the full run (brief + panel + analysis + answer) to FILE. |
 
 ## Implementation notes

@@ -8,4 +8,6 @@ Read every panel answer in full, then produce a structured analysis with exactly
 - Unique insights: correct or valuable points raised by only one panelist that the others missed and that the final answer should keep.
 - Blind spots: aspects of the question nobody addressed, shared mistakes or assumptions across the whole panel, and anything the question itself smuggles in that went unexamined. This is where you add the most value — reason past the panel, don't just summarize it.
 
-Attribute panel claims to their source when the panelist named one. Keep it tight and concrete. The synthesizer reads this to decide what to trust, what to reconcile, and what to fix — write for that purpose.
+Attribute panel claims to their source when the panelist named one. Keep it tight and concrete.
+
+Your analysis is the synthesizer's primary input — it writes the final answer from this, and may not re-read the raw panel answers. So your analysis must be self-contained: carry through the load-bearing specifics (key numbers, names, dates, and any source/URL a claim rests on) and any unique insight in enough detail that the synthesizer can use it without the original answer in front of it. Be concise, but don't drop a fact the final answer would need.
