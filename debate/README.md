@@ -59,12 +59,20 @@ mixing in weaker models. Lower-tier models are reserved for lower-level tasks.
 
 ## How it works
 
-1. **Panel (parallel).** Each model in the tier's panel answers concurrently with
-   the `web_search_20260209` and `code_execution_20260120` server tools (GA — no
-   beta header). Web search reaches the live web; code execution is a sandboxed
-   bash/python environment (no internet) for computation and checks.
+0. **Framing.** Before fan-out, a shared context brief is written for the question
+   (interpretation, key definitions, scope, fixed assumptions, dimensions to
+   address) and given to every panelist, so they answer the same question and
+   stay comparable. It fixes the frame, not the answer — no position is taken.
+1. **Panel (parallel).** Each model in the tier's panel answers the *framed*
+   question concurrently with the `web_search_20260209` and
+   `code_execution_20260120` server tools (GA — no beta header). Web search
+   reaches the live web; code execution is a sandboxed bash/python environment
+   (no internet) for computation and checks.
 2. **Judge.** The judge model reads every panel answer and extracts the structure.
 3. **Synthesis.** The synthesizer writes the final answer grounded in that analysis.
+
+The framing pass runs on the tier's synthesizer model; the brief is also passed
+to the judge and synthesizer so they know the intended scope.
 
 ## Flags
 

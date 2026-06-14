@@ -33,13 +33,18 @@ defaults to standard, dropping to quick only for clearly low-level questions
 ## How it works
 
 The `fusion` skill runs in your main session as the orchestrator and drives
-three phases, on the models the tier selects:
+these phases, on the models the tier selects:
 
+0. **Framing.** Before fanning out, the orchestrator writes a short shared context
+   brief for the question — interpretation, key definitions, scope, fixed
+   assumptions, and the dimensions to address — so the panel stays on one topic
+   and the answers are comparable. It fixes the frame, not the answer.
 1. **Panel (parallel).** It spawns the `panelist` subagent once per panel model
-   at once, setting each one's model via the Agent tool's `model` override. Each
-   panelist has web search + bash and answers independently — no cross-talk. At
+   at once, setting each one's model via the Agent tool's `model` override, and
+   gives every panelist the same question *plus the shared brief*. Each panelist
+   has web search + bash and answers independently — no cross-talk. At
    standard/deep the panelists share the Opus model; they still diverge via
-   independent tool use and sampling.
+   independent reasoning, but on the same framed question.
 2. **Judge.** The `judge` subagent reads every panel answer and extracts the
    structure: consensus, contradictions, partial coverage, unique insights,
    blind spots.

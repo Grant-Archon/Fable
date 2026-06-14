@@ -120,14 +120,26 @@ def banner(title: str, body: str) -> None:
 
 def run_fusion(client: Anthropic, question: str, *, panel: list[str], judge_model: str,
                synth_model: str, max_tokens: int) -> dict:
+    framing_system = load_prompt("framing_system.md")
     panelist_system = load_prompt("panelist_system.md")
     judge_system = load_prompt("judge_system.md")
     synth_system = load_prompt("synthesizer_system.md")
     timings: dict[str, float] = {}
 
-    # --- Phase 1: panel fan-out (parallel, tool-enabled, heterogeneous models) ---
+    # --- Phase 0: framing — a shared context brief keeps the panel on one topic ---
+    t0 = time.time()
+    brief = complete(client, model=synth_model, system=framing_system,
+                     user=f"Question:\n{question}", max_tokens=max_tokens)
+    timings["framing"] = time.time() - t0
+    banner(f"SHARED CONTEXT BRIEF  [{synth_model}]", brief)
+
+    framed_question = (f"Question:\n{question}\n\nShared context brief (all panelists share this "
+                       f"frame — stay within it; reason independently on the substance):\n"
+                       f"<context_brief>\n{brief}\n</context_brief>")
+
+    # --- Phase 1: panel fan-out (parallel, tool-enabled, all on the same frame) ---
     def ask_panelist(model: str) -> str:
-        return complete(client, model=model, system=panelist_system, user=f"Question:\n{question}",
+        return complete(client, model=model, system=panelist_system, user=framed_question,
                         tools=PANEL_TOOLS, max_tokens=max_tokens)
 
     t0 = time.time()
@@ -150,8 +162,9 @@ def run_fusion(client: Anthropic, question: str, *, panel: list[str], judge_mode
     )
 
     # --- Phase 2: judge extracts the structure across the panel ---
-    judge_user = (f"Question:\n{question}\n\nHere are the panel's answers. Extract the structure "
-                  f"across them.\n\n{panel_block}")
+    judge_user = (f"Question:\n{question}\n\nShared context brief the panel worked from:\n"
+                  f"<context_brief>\n{brief}\n</context_brief>\n\n"
+                  f"Here are the panel's answers. Extract the structure across them.\n\n{panel_block}")
     t0 = time.time()
     analysis = complete(client, model=judge_model, system=judge_system, user=judge_user,
                         max_tokens=max_tokens)
@@ -159,7 +172,9 @@ def run_fusion(client: Anthropic, question: str, *, panel: list[str], judge_mode
     banner(f"JUDGE ANALYSIS  [{judge_model}]", analysis)
 
     # --- Phase 3: synthesizer writes the final answer, grounded in the analysis ---
-    synth_user = (f"Question:\n{question}\n\nThe judge's structural analysis of the panel:\n\n"
+    synth_user = (f"Question:\n{question}\n\nShared context brief the panel worked from:\n"
+                  f"<context_brief>\n{brief}\n</context_brief>\n\n"
+                  f"The judge's structural analysis of the panel:\n\n"
                   f"<judge_analysis>\n{analysis}\n</judge_analysis>\n\n"
                   f"The panel's answers:\n\n{panel_block}\n\n"
                   f"Write the single best final answer for the user, grounded in the analysis.")
@@ -175,6 +190,7 @@ def run_fusion(client: Anthropic, question: str, *, panel: list[str], judge_mode
     return {
         "question": question,
         "config": {"panel": panel, "judge_model": judge_model, "synth_model": synth_model},
+        "context_brief": brief,
         "panel": [{"label": l, "model": m, "answer": t} for l, m, t in answers],
         "judge_analysis": analysis,
         "timings": timings,
