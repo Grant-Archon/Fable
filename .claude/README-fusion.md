@@ -1,10 +1,9 @@
 # /fusion — panel → judge → synthesis (Claude Code)
 
 Answer a question by fanning it out to a panel of models in parallel (each with
-web search and bash), having a judge extract the structure across their answers,
-then a synthesizer write the final answer grounded in that analysis. This is the
-ensemble / mixture-of-agents pattern (inspired by OpenRouter Fusion); a
-programmatic API version lives in `../debate/fusion.py`.
+web search), having a judge extract the structure across their answers, then a
+synthesizer write the final answer grounded in that analysis. This is the
+ensemble / mixture-of-agents pattern, inspired by OpenRouter Fusion.
 
 ## Use
 
@@ -50,8 +49,7 @@ these phases, on the models the tier selects:
    panelist has web search and answers independently — no cross-talk. At
    standard/deep the panelists run on the same Opus model, so the lenses (not the
    model) are what make them genuinely diverge. (Panelists are not granted Bash —
-   they reason and search; the API path's sandboxed code execution is not mirrored
-   to the user's real shell here.)
+   they reason and search rather than run shell commands.)
 2. **Judge.** The `judge` subagent reads every panel answer and extracts the
    structure: consensus, contradictions, partial coverage, unique insights,
    blind spots.
